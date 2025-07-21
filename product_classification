@@ -1,0 +1,117 @@
+import tensorflow as tf
+from tensorflow.keras.applications import MobileNetV3Small
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Conv2D
+from tensorflow.keras.models import Model
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+import numpy as np
+# Enable mixed precision for faster training
+tf.keras.mixed_precision.set_global_policy('mixed_float16')
+
+
+# Load and preprocess Fashion MNIST data
+from tensorflow.keras.datasets import fashion_mnist
+(train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
+
+# Reshape images and normalize
+train_images = np.expand_dims(train_images, -1)
+test_images = np.expand_dims(test_images, -1)
+
+# Resize images to 96x96 and normalize
+train_images = tf.image.resize(train_images, (96, 96)) / 255.0
+test_images = tf.image.resize(test_images, (96, 96)) / 255.0
+
+
+
+
+num_classes = 10
+
+# Load the pretrained MobileNetV3Small model
+base_model = MobileNetV3Small(weights='imagenet', include_top=False, input_shape=(96, 96, 3))
+base_model.trainable = False  # Freeze all layers
+
+
+
+inputs = tf.keras.Input(shape=(96, 96, 1))
+x = Conv2D(3, (3, 3), padding='same')(inputs)  # Convert grayscale to RGB
+
+
+
+
+# Pass through the pretrained model
+x = base_model(x, training=False)
+
+# Add global pooling and dense layers
+x = GlobalAveragePooling2D()(x)
+x = Dense(1024, activation='relu')(x)
+outputs = Dense(num_classes, activation='softmax', dtype='float32')(x)
+
+
+# Build the model
+model = Model(inputs=inputs, outputs=outputs)
+
+# Compile the model
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+              loss='sparse_categorical_crossentropy',
+              metrics=['accuracy'])
+
+
+
+# Set up data augmentation with a smaller batch size
+train_datagen = ImageDataGenerator(rotation_range=20, width_shift_range=0.2,
+                                   height_shift_range=0.2, horizontal_flip=True)
+train_generator = train_datagen.flow(train_images, train_labels, batch_size=32)
+
+
+
+# Early stopping and model checkpoint to save the best model
+early_stopping = EarlyStopping(monitor='val_loss', patience=2, restore_best_weights=True)
+checkpoint = ModelCheckpoint("best_model.h5", monitor='val_accuracy', save_best_only=True, mode='max')
+
+# Train for a smaller number of epochs
+history = model.fit(train_generator, epochs=5,
+                    validation_data=(test_images, test_labels),
+                    callbacks=[early_stopping, checkpoint])
+
+
+model.load_weights("best_model.h5")
+test_loss, test_accuracy = model.evaluate(test_images, test_labels)
+print(f"Test accuracy: {test_accuracy * 100:.2f}%")
+
+mport tensorflow as tf
+import numpy as np
+from tensorflow.keras.preprocessing import image
+
+# Load the saved model
+model = tf.keras.models.load_model("best_model.h5")
+
+# Function to preprocess and predict on a new image
+def preprocess_and_predict(img_path):
+    # Load and preprocess the image
+    img = image.load_img(img_path, target_size=(96, 96), color_mode='grayscale')  # Load as grayscale
+    img_array = image.img_to_array(img)  # Convert to array
+    img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
+    img_array = tf.image.resize(img_array, (96, 96))  # Resize if needed
+    # The line below was causing the error, as the model expected grayscale input,
+    #  but it was receiving an RGB image due to this conversion
+    # img_array = tf.image.grayscale_to_rgb(img_array)  # Remove this line
+    img_array = img_array / 255.0  # Normalize pixel values to [0, 1]
+
+    # Make a prediction
+    predictions = model.predict(img_array)
+    predicted_class = np.argmax(predictions, axis=-1)
+
+    return predicted_class[0]
+
+# Example usage: Replace 'path/to/your/image.jpg' with the path to your image
+class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat', 'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+img_path = '/content/trouser.jpg'
+predicted_class = preprocess_and_predict(img_path)
+print(f"Predicted class: {predicted_class}")
+print("Type of product image uploaded is ",class_names[predicted_class])
+
+img_path = '/content/shirt.jpeg'
+predicted_class = preprocess_and_predict(img_path)
+print(f"Predicted class: {predicted_class}")
+print("Type of product image uploaded is ",class_names[predicted_class])
+
